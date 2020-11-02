@@ -3,6 +3,8 @@
 #![warn(rust_2018_idioms)]
 #![cfg(target_family = "unix")]
 
+mod options;
+
 // https://man7.org/linux/man-pages/man7/daemon.7.html
 // https://fraserblog.codewise.org/rust-and-file-descriptors/
 
@@ -25,8 +27,8 @@ pub enum Error {
     #[error("failed to unblock signals: {0}")]
     UnblockSignals(nix::Error),
 
-    #[error("failed to create status reporting pipes: {0}")]
-    CreatePipes(nix::Error),
+    #[error("failed to create status reporting pipe: {0}")]
+    CreatePipe(nix::Error),
 
     #[error("failed to fork daemon process: {0}")]
     Fork(nix::Error),
@@ -60,10 +62,10 @@ pub enum DaemonError {
     ChangeRoot = 3,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug)]
 enum ForkResult {
-    Invoker,
-    Daemon,
+    Invoker(Pipe, nix::unistd::Pid),
+    Daemon(Pipe),
 }
 
 pub fn launch<F>(_daemon: F) -> InvocationResult
@@ -73,15 +75,24 @@ where
     Ok(())
 }
 
-pub fn daemonize() -> InvocationResult {
+pub fn daemonize(options: options::Options) -> InvocationResult {
     close_descriptors()?;
     reset_signals()?;
     block_signals()?;
-    let pipes = ipc::create_pipes()?;
+    let pipe = Pipe::new()?;
 
-    match fork(pipes)? {
-        (ForkResult::Invoker, pipes) => finalize_invoker(pipes),
-        (ForkResult::Daemon, pipes) => finalize_daemon(pipes),
+    match fork(pipe)? {
+        ForkResult::Invoker(pipe, child) => match finalize_invoker(pipe, child) {
+            Ok(_) => std::process::exit(0),
+            Err(err) => Err(err),
+        },
+        ForkResult::Daemon(pipe) => match finalize_daemon(options) {
+            Ok(_) => {
+                pipe.write(0);
+                Ok(())
+            }
+            Err((error, cause)) => exit_error(pipe, error, cause),
+        },
     }
 }
 
@@ -135,88 +146,66 @@ fn unblock_signals() -> nix::Result<()> {
     nix::sigprocmask(mask, Some(&sigset), None)
 }
 
-fn fork(pipes: ipc::Pipes) -> InvocationResult<(ForkResult, ipc::Pipes)> {
+fn fork(pipe: Pipe) -> InvocationResult<ForkResult> {
     use nix::unistd;
 
     match unsafe { unistd::fork() } {
         Err(err) => Err(Error::Fork(err)),
-        Ok(unistd::ForkResult::Parent { child }) => {
-            match unblock_signals().and_then(|_| nix::sys::wait::waitpid(child, None)) {
-                Ok(_) => Ok((ForkResult::Invoker, pipes)),
-                Err(err) => ipc::cancel_daemon(err, pipes),
-            }
-        }
+        Ok(unistd::ForkResult::Parent { child }) => Ok(ForkResult::Invoker(pipe, child)),
         Ok(unistd::ForkResult::Child) => match unistd::setsid() {
-            Err(err) => ipc::exit_error(DaemonError::Setsid, err, pipes),
+            Err(err) => exit_error(pipe, DaemonError::Setsid, err),
             Ok(_) => match unsafe { nix::unistd::fork() } {
-                Err(err) => ipc::exit_error(DaemonError::Fork, err, pipes),
-                Ok(unistd::ForkResult::Parent { child: _ }) => ipc::exit_success(pipes),
-                Ok(unistd::ForkResult::Child) => Ok((ForkResult::Daemon, pipes)),
+                Err(err) => exit_error(pipe, DaemonError::Fork, err),
+                Ok(unistd::ForkResult::Parent { child: _ }) => exit_success(pipe),
+                Ok(unistd::ForkResult::Child) => Ok(ForkResult::Daemon(pipe)),
             },
         },
     }
 }
 
-fn finalize_invoker(pipes: ipc::Pipes) -> InvocationResult {
-    match ipc::read_daemon_status(pipes).and_then(ipc::read_daemon_status) {
-        Ok(pipes) => ipc::exit_success(pipes),
-        Err(err) => Err(err),
+fn finalize_invoker(pipe: Pipe, child: nix::unistd::Pid) -> InvocationResult {
+    let _ = unblock_signals();
+    let _ = nix::sys::wait::waitpid(child, None);
+    pipe.read().and_then(Pipe::read).map(|_| ())
+}
+
+fn finalize_daemon(options: options::Options) -> Result<(), (DaemonError, nix::Error)> {
+    nix::unistd::chdir(&options.root).map_err(|err| (DaemonError::ChangeRoot, err))?;
+    nix::sys::stat::umask(nix::sys::stat::Mode::empty());
+    if let Some(user) = options.user {
+        nix::unistd::setuid(user)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Pipe {
+    reader: std::os::unix::io::RawFd,
+    writer: std::os::unix::io::RawFd,
+}
+
+impl std::ops::Drop for Pipe {
+    fn drop(&mut self) {
+        let _ = nix::unistd::close(self.reader);
+        let _ = nix::unistd::close(self.writer);
     }
 }
 
-fn finalize_daemon(pipes: ipc::Pipes) -> InvocationResult {
-    fn finalize() -> Result<(), (DaemonError, nix::Error)> {
-        nix::unistd::chdir("/").map_err(|err| (DaemonError::ChangeRoot, err))?;
-        nix::sys::stat::umask(nix::sys::stat::Mode::empty());
-        Ok(())
-    }
-
-    match finalize() {
-        Ok(_) => {
-            if ipc::should_continue(pipes) {
-                Ok(())
-            } else {
-                std::process::exit(0)
-            }
-        }
-        Err((error, cause)) => ipc::exit_error(error, cause, pipes),
-    }
-}
-
-mod ipc {
-    use super::{DaemonError, Error, ForkResult, InvocationResult};
-
-    #[derive(Debug)]
-    pub(super) struct Pipes {
-        reader: std::os::unix::io::RawFd,
-        writer: std::os::unix::io::RawFd,
-    }
-
-    impl std::ops::Drop for Pipes {
-        fn drop(&mut self) {
-            println!("Closing pipes");
-            let _ = nix::unistd::close(self.reader);
-            let _ = nix::unistd::close(self.writer);
-        }
-    }
-
-    pub(super) fn create_pipes() -> InvocationResult<Pipes> {
+impl Pipe {
+    fn new() -> InvocationResult<Self> {
         nix::unistd::pipe()
-            .map(|(reader, writer)| Pipes { reader, writer })
-            .map_err(|err| Error::CreatePipes(err.into()))
+            .map(|(reader, writer)| Self { reader, writer })
+            .map_err(|err| Error::CreatePipe(err.into()))
     }
 
-    pub(super) fn read_daemon_status(pipes: Pipes) -> InvocationResult<Pipes> {
+    fn read(self) -> InvocationResult<Self> {
         let mut status = [0u8];
-        println!("Reading status");
-        nix::unistd::read(pipes.reader, &mut status).map_err(Error::ReadStatus)?;
+        nix::unistd::read(self.reader, &mut status).map_err(Error::ReadStatus)?;
         if status[0] == 0 {
-            println!("All is good");
-            Ok(pipes)
+            Ok(self)
         } else {
-            println!("Reading error");
             let mut error = [0u8; 4];
-            nix::unistd::read(pipes.reader, &mut error).map_err(Error::ReadStatus)?;
+            nix::unistd::read(self.reader, &mut error).map_err(Error::ReadStatus)?;
             let error = i32::from_be_bytes(error);
 
             Err(Error::daemon(
@@ -226,46 +215,30 @@ mod ipc {
         }
     }
 
-    pub(super) fn cancel_daemon(
-        err: nix::Error,
-        pipes: Pipes,
-    ) -> InvocationResult<(ForkResult, Pipes)> {
-        let _ = nix::unistd::write(pipes.writer, &[255]);
-        Err(Error::Fork(err))
+    fn write(self, status: u8) {
+        let _ = nix::unistd::write(self.writer, &[status]);
     }
 
-    pub(super) fn should_continue(pipes: Pipes) -> bool {
-        let _ = nix::unistd::write(pipes.writer, &[0]);
-        let mut status = [0u8];
-        match nix::unistd::read(pipes.reader, &mut status).map_err(Error::ReadStatus) {
-            Ok(_) => status[0] == 0,
-            Err(_) => false,
-        }
+    fn error(self, error: DaemonError, errno: i32) {
+        let errno = errno.to_be();
+        let errno_ptr = (&errno as *const i32) as *const u8;
+
+        let _ = nix::unistd::write(self.writer, &[error as u8]);
+        let _ = nix::unistd::write(self.writer, unsafe {
+            std::slice::from_raw_parts(errno_ptr, 4)
+        });
     }
+}
 
-    pub(super) fn exit_success(pipes: Pipes) -> ! {
-        fn write_ok(pipes: Pipes) {
-            let _ = nix::unistd::write(pipes.writer, &[0]);
-        }
+fn exit_success(pipe: Pipe) -> ! {
+    pipe.write(0);
+    std::process::exit(0);
+}
 
-        write_ok(pipes);
-        std::process::exit(0);
-    }
-
-    pub(super) fn exit_error(error: DaemonError, cause: nix::Error, pipes: Pipes) -> ! {
-        fn write_error(status: i32, pipes: Pipes) {
-            let status = status.to_be();
-            let status_ptr = (&status as *const i32) as *const u8;
-            let _ = nix::unistd::write(pipes.writer, unsafe {
-                std::slice::from_raw_parts(status_ptr, 4)
-            });
-        }
-
-        let _ = nix::unistd::write(pipes.writer, &[error as u8]);
-        let status = cause.as_errno().map_or(-1, |errno| errno as i32);
-        write_error(status, pipes);
-        std::process::exit(status);
-    }
+fn exit_error(pipe: Pipe, error: DaemonError, cause: nix::Error) -> ! {
+    let errno = cause.as_errno().map_or(-1, |errno| errno as i32);
+    pipe.error(error, errno);
+    std::process::exit(errno);
 }
 
 #[cfg(test)]

@@ -14,12 +14,26 @@ pub enum Stdio {
     Null,
 }
 
-pub struct DaemonOptions {
-    pid_file: Option<std::path::PathBuf>,
-    user: Option<User>,
-    group: Option<Group>,
-    root: std::path::PathBuf,
-    stdin: Stdio,
-    stdout: Stdio,
-    stderr: Stdio,
+pub struct Options {
+    pub(super) pid_file: Option<std::path::PathBuf>,
+    pub(super) user: Option<User>,
+    pub(super) group: Option<Group>,
+    pub(super) root: std::path::PathBuf,
+    pub(super) stdin: Option<Stdio>,
+    pub(super) stdout: Option<Stdio>,
+    pub(super) stderr: Option<Stdio>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            pid_file: None,
+            user: None,
+            group: None,
+            root: std::path::PathBuf::from("/"),
+            stdin: None,
+            stdout: None,
+            stderr: None,
+        }
+    }
 }
