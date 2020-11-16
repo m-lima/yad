@@ -3,15 +3,19 @@
 #![warn(rust_2018_idioms)]
 #![cfg(target_family = "unix")]
 
-mod options;
+pub mod options;
 
 // https://man7.org/linux/man-pages/man7/daemon.7.html
 // https://fraserblog.codewise.org/rust-and-file-descriptors/
 
 type InvocationResult<T = ()> = Result<T, Error>;
+type DaemonResult<T = ()> = Result<T, (DaemonError, nix::Error)>;
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Error {
+    #[error("daemon pid file already exists")]
+    DaemonAlreadyRunning,
+
     #[error("failed to close file descriptors: {0}")]
     CloseDescriptors(nix::Error),
 
@@ -23,9 +27,6 @@ pub enum Error {
 
     #[error("failed to block signals: {0}")]
     BlockSignals(nix::Error),
-
-    #[error("failed to unblock signals: {0}")]
-    UnblockSignals(nix::Error),
 
     #[error("failed to create status reporting pipe: {0}")]
     CreatePipe(nix::Error),
@@ -52,14 +53,44 @@ impl Error {
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum DaemonError {
+    #[error("failed heart beat")]
+    Heartbeat = 1,
+
     #[error("failed to detach from session")]
-    Setsid = 1,
+    Setsid = 2,
 
     #[error("failed to double fork daemon")]
-    Fork = 2,
+    Fork = 3,
 
     #[error("failed to change root directory")]
-    ChangeRoot = 3,
+    ChangeRoot = 4,
+
+    #[error("failed to set user")]
+    SetUser = 5,
+
+    #[error("failed to set group")]
+    SetGroup = 6,
+
+    #[error("failed to unblock signals")]
+    UnblockSignals = 7,
+
+    #[error("failed to close file descriptors")]
+    CloseDescriptors = 8,
+
+    #[error("failed to fetch open file descriptors")]
+    ListOpenDescriptors = 9,
+
+    #[error("failed to reset signal handlers")]
+    ResetSignals = 10,
+
+    #[error("failed to redirect stdin")]
+    RedirectStdin = 11,
+
+    #[error("failed to redirect stdout")]
+    RedirectStdout = 12,
+
+    #[error("failed to redirect stderr")]
+    RedirectStderr = 13,
 }
 
 #[derive(Debug)]
@@ -68,14 +99,11 @@ enum ForkResult {
     Daemon(Pipe),
 }
 
-pub fn launch<F>(_daemon: F) -> InvocationResult
+pub fn daemonize<O>(options: O) -> InvocationResult<Heartbeat>
 where
-    F: FnOnce() -> (),
+    O: Into<Option<options::Options>>,
 {
-    Ok(())
-}
-
-pub fn daemonize(options: options::Options) -> InvocationResult {
+    let options = options.into().unwrap_or_default();
     close_descriptors()?;
     reset_signals()?;
     block_signals()?;
@@ -87,10 +115,7 @@ pub fn daemonize(options: options::Options) -> InvocationResult {
             Err(err) => Err(err),
         },
         ForkResult::Daemon(pipe) => match finalize_daemon(options) {
-            Ok(_) => {
-                pipe.write(0);
-                Ok(())
-            }
+            Ok(_) => Ok(Heartbeat(Some(pipe))),
             Err((error, cause)) => exit_error(pipe, error, cause),
         },
     }
@@ -169,13 +194,66 @@ fn finalize_invoker(pipe: Pipe, child: nix::unistd::Pid) -> InvocationResult {
     pipe.read().and_then(Pipe::read).map(|_| ())
 }
 
-fn finalize_daemon(options: options::Options) -> Result<(), (DaemonError, nix::Error)> {
+fn finalize_daemon(options: options::Options) -> DaemonResult {
+    unblock_signals().map_err(|err| (DaemonError::UnblockSignals, err))?;
     nix::unistd::chdir(&options.root).map_err(|err| (DaemonError::ChangeRoot, err))?;
     nix::sys::stat::umask(nix::sys::stat::Mode::empty());
-    if let Some(user) = options.user {
-        nix::unistd::setuid(user)?;
+    change_user(options.user, options.group)?;
+    redirect_streams(options.stdin, options.stdout, options.stderr)
+}
+
+fn change_user(user: Option<nix::unistd::User>, group: Option<nix::unistd::Group>) -> DaemonResult {
+    if let Some(user) = user {
+        nix::unistd::setuid(user.uid).map_err(|err| (DaemonError::SetUser, err))?;
     }
+
+    if let Some(group) = group {
+        nix::unistd::setgid(group.gid).map_err(|err| (DaemonError::SetGroup, err))?;
+    }
+
     Ok(())
+}
+
+fn redirect_streams(
+    stdin: Option<options::Stdio>,
+    stdout: Option<options::Stdio>,
+    stderr: Option<options::Stdio>,
+) -> DaemonResult {
+    use nix::libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
+    use std::os::unix::io::{AsRawFd, RawFd};
+
+    let mut devnull = None::<std::fs::File>;
+
+    let mut dev_null_fd = |error: DaemonError| -> DaemonResult<RawFd> {
+        if devnull.is_none() {
+            devnull = Some(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open("/dev/null")
+                    .map_err(|_| (error, nix::Error::last()))?,
+            );
+        }
+
+        Ok(devnull.as_ref().unwrap().as_raw_fd())
+    };
+
+    let mut redirect_stream =
+        |stdio: Option<options::Stdio>, fd: RawFd, error: DaemonError| -> DaemonResult {
+            if let Some(stdio) = stdio {
+                let new_fd = match stdio {
+                    options::Stdio::Null => dev_null_fd(error)?,
+                    options::Stdio::Fd(fd) => fd,
+                    options::Stdio::File(ref file) => file.as_raw_fd(),
+                };
+                nix::unistd::dup2(fd, new_fd).map_err(|err| (error, err))?;
+            }
+            Ok(())
+        };
+
+    redirect_stream(stdin, STDIN_FILENO, DaemonError::RedirectStdin)?;
+    redirect_stream(stdout, STDOUT_FILENO, DaemonError::RedirectStdout)?;
+    redirect_stream(stderr, STDERR_FILENO, DaemonError::RedirectStderr)
 }
 
 #[derive(Debug)]
@@ -227,6 +305,30 @@ impl Pipe {
         let _ = nix::unistd::write(self.writer, unsafe {
             std::slice::from_raw_parts(errno_ptr, 4)
         });
+    }
+}
+
+pub struct Heartbeat(Option<Pipe>);
+
+impl Heartbeat {
+    pub fn fail(mut self, errno: i32) {
+        if let Some(pipe) = self.0.take() {
+            pipe.error(DaemonError::Heartbeat, errno);
+        }
+    }
+
+    pub fn ok(mut self) {
+        if let Some(pipe) = self.0.take() {
+            pipe.write(0);
+        }
+    }
+}
+
+impl Drop for Heartbeat {
+    fn drop(&mut self) {
+        if let Some(pipe) = self.0.take() {
+            pipe.write(0);
+        }
     }
 }
 
