@@ -42,6 +42,9 @@ pub enum Error {
         error: DaemonError,
         cause: nix::Error,
     },
+
+    #[error("daemon sent failed heart beat: status code: {status}")]
+    Heartbeat { status: i32 },
 }
 
 impl Error {
@@ -99,11 +102,15 @@ enum ForkResult {
     Daemon(Pipe),
 }
 
-pub fn daemonize<O>(options: O) -> InvocationResult<Heartbeat>
-where
-    O: Into<Option<options::Options>>,
-{
-    let options = options.into().unwrap_or_default();
+pub fn daemonize() -> InvocationResult<Heartbeat> {
+    daemonize_inner(options::Options::new())
+}
+
+pub fn with_options() -> options::Options {
+    options::Options::new()
+}
+
+fn daemonize_inner(options: options::Options) -> InvocationResult<Heartbeat> {
     close_descriptors()?;
     reset_signals()?;
     block_signals()?;
@@ -215,16 +222,17 @@ fn change_user(user: Option<nix::unistd::User>, group: Option<nix::unistd::Group
 }
 
 fn redirect_streams(
-    stdin: Option<options::Stdio>,
-    stdout: Option<options::Stdio>,
-    stderr: Option<options::Stdio>,
+    stdin: Option<options::Stdio<options::Input>>,
+    stdout: Option<options::Stdio<options::Output>>,
+    stderr: Option<options::Stdio<options::Output>>,
 ) -> DaemonResult {
     use nix::libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
     use std::os::unix::io::{AsRawFd, RawFd};
+    use DaemonError::{RedirectStderr, RedirectStdin, RedirectStdout};
 
     let mut devnull = None::<std::fs::File>;
 
-    let mut dev_null_fd = |error: DaemonError| -> DaemonResult<RawFd> {
+    let mut devnull_fd = |error: DaemonError| -> DaemonResult<RawFd> {
         if devnull.is_none() {
             devnull = Some(
                 std::fs::OpenOptions::new()
@@ -238,22 +246,43 @@ fn redirect_streams(
         Ok(devnull.as_ref().unwrap().as_raw_fd())
     };
 
-    let mut redirect_stream =
-        |stdio: Option<options::Stdio>, fd: RawFd, error: DaemonError| -> DaemonResult {
-            if let Some(stdio) = stdio {
-                let new_fd = match stdio {
-                    options::Stdio::Null => dev_null_fd(error)?,
-                    options::Stdio::Fd(fd) => fd,
-                    options::Stdio::File(ref file) => file.as_raw_fd(),
-                };
-                nix::unistd::dup2(fd, new_fd).map_err(|err| (error, err))?;
-            }
-            Ok(())
-        };
+    fn redirect_stream<F, P>(
+        devnull_fd: &mut F,
+        stdio: Option<options::Stdio<P>>,
+        fd: RawFd,
+        error: DaemonError,
+    ) -> DaemonResult
+    where
+        F: FnMut(DaemonError) -> DaemonResult<RawFd>,
+        P: options::StdioPath,
+    {
+        if let Some(stdio) = stdio {
+            nix::unistd::close(fd).map_err(|err| (error, err))?;
+            let new_fd = match stdio {
+                options::Stdio::Null => devnull_fd(error)?,
+                options::Stdio::Fd(fd) => fd,
+                options::Stdio::Path(path) => {
+                    let file = std::fs::OpenOptions::new()
+                        .read(path.read())
+                        .write(path.write())
+                        .append(path.append())
+                        .create(!path.read())
+                        .truncate(path.write() && !path.append())
+                        .open(path.path())
+                        .map_err(|_| (error, nix::Error::last()))?;
+                    let fd = file.as_raw_fd();
+                    std::mem::forget(file);
+                    fd
+                }
+            };
+            nix::unistd::dup2(fd, new_fd).map_err(|err| (error, err))?;
+        }
+        Ok(())
+    }
 
-    redirect_stream(stdin, STDIN_FILENO, DaemonError::RedirectStdin)?;
-    redirect_stream(stdout, STDOUT_FILENO, DaemonError::RedirectStdout)?;
-    redirect_stream(stderr, STDERR_FILENO, DaemonError::RedirectStderr)
+    redirect_stream(&mut devnull_fd, stdin, STDIN_FILENO, RedirectStdin)?;
+    redirect_stream(&mut devnull_fd, stdout, STDOUT_FILENO, RedirectStdout)?;
+    redirect_stream(&mut devnull_fd, stderr, STDERR_FILENO, RedirectStderr)
 }
 
 #[derive(Debug)]
@@ -286,10 +315,14 @@ impl Pipe {
             nix::unistd::read(self.reader, &mut error).map_err(Error::ReadStatus)?;
             let error = i32::from_be_bytes(error);
 
-            Err(Error::daemon(
-                unsafe { std::mem::transmute::<u8, DaemonError>(status[0]) },
-                nix::Error::from_errno(nix::errno::from_i32(error)),
-            ))
+            if status[0] == DaemonError::Heartbeat as u8 {
+                Err(Error::Heartbeat { status: error })
+            } else {
+                Err(Error::daemon(
+                    unsafe { std::mem::transmute::<u8, DaemonError>(status[0]) },
+                    nix::Error::from_errno(nix::errno::from_i32(error)),
+                ))
+            }
         }
     }
 
