@@ -246,30 +246,23 @@ fn redirect_streams(
         Ok(devnull.as_ref().unwrap().as_raw_fd())
     };
 
-    fn redirect_stream<F, P>(
-        devnull_fd: &mut F,
-        stdio: Option<options::Stdio<P>>,
+    fn redirect_stream<D, F>(
+        devnull_fd: &mut D,
+        stdio: Option<options::Stdio<F>>,
         fd: RawFd,
         error: DaemonError,
     ) -> DaemonResult
     where
-        F: FnMut(DaemonError) -> DaemonResult<RawFd>,
-        P: options::StdioPath,
+        D: FnMut(DaemonError) -> DaemonResult<RawFd>,
+        F: options::File,
     {
         if let Some(stdio) = stdio {
             nix::unistd::close(fd).map_err(|err| (error, err))?;
             let new_fd = match stdio {
                 options::Stdio::Null => devnull_fd(error)?,
                 options::Stdio::Fd(fd) => fd,
-                options::Stdio::Path(path) => {
-                    let file = std::fs::OpenOptions::new()
-                        .read(path.read())
-                        .write(path.write())
-                        .append(path.append())
-                        .create(!path.read())
-                        .truncate(path.write() && !path.append())
-                        .open(path.path())
-                        .map_err(|_| (error, nix::Error::last()))?;
+                options::Stdio::File(file) => {
+                    let file = file.open().map_err(|_| (error, nix::Error::last()))?;
                     let fd = file.as_raw_fd();
                     std::mem::forget(file);
                     fd

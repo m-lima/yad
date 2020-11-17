@@ -1,80 +1,95 @@
+pub trait File {
+    fn open(&self) -> std::io::Result<std::fs::File>;
+}
+
 pub struct Input {
-    pub(super) path: std::path::PathBuf,
+    path: std::path::PathBuf,
+    create: bool,
+}
+
+impl Input {
+    fn new<P: Into<std::path::PathBuf>>(path: P) -> Self {
+        Self {
+            path: path.into(),
+            create: false,
+        }
+    }
+
+    pub fn create(mut self) -> Self {
+        self.create = true;
+        self
+    }
+}
+
+impl std::convert::Into<Stdio<Input>> for Input {
+    fn into(self) -> Stdio<Input> {
+        Stdio::File(self)
+    }
+}
+
+impl File for Input {
+    fn open(&self) -> std::io::Result<std::fs::File> {
+        if self.create {
+            if self.path.exists() && self.path.is_file() {
+                std::fs::File::create(&self.path)?;
+            }
+        }
+
+        std::fs::File::open(&self.path)
+    }
 }
 
 pub struct Output {
-    pub(super) path: std::path::PathBuf,
-    pub(super) append: bool,
+    path: std::path::PathBuf,
+    append: bool,
 }
 
-pub trait StdioPath {
-    fn read(&self) -> bool;
-    fn write(&self) -> bool;
-    fn append(&self) -> bool;
-    fn path(&self) -> &std::path::Path;
-}
-
-impl StdioPath for Input {
-    fn read(&self) -> bool {
-        true
+impl Output {
+    fn new<P: Into<std::path::PathBuf>>(path: P) -> Self {
+        Self {
+            path: path.into(),
+            append: false,
+        }
     }
 
-    fn write(&self) -> bool {
-        false
-    }
-
-    fn append(&self) -> bool {
-        false
-    }
-
-    fn path(&self) -> &std::path::Path {
-        &self.path
+    pub fn append(mut self) -> Self {
+        self.append = true;
+        self
     }
 }
 
-impl StdioPath for Output {
-    fn read(&self) -> bool {
-        false
-    }
-
-    fn write(&self) -> bool {
-        true
-    }
-
-    fn append(&self) -> bool {
-        self.append
-    }
-
-    fn path(&self) -> &std::path::Path {
-        &self.path
+impl std::convert::Into<Stdio<Output>> for Output {
+    fn into(self) -> Stdio<Output> {
+        Stdio::File(self)
     }
 }
 
-pub enum Stdio<P: StdioPath> {
-    Path(P),
+impl File for Output {
+    fn open(&self) -> std::io::Result<std::fs::File> {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(!self.append)
+            .append(self.append)
+            .open(&self.path)
+    }
+}
+
+pub enum Stdio<F: File> {
+    File(F),
     Fd(i32),
     Null,
 }
 
 impl Stdio<Input> {
-    pub fn open<P: Into<std::path::PathBuf>>(path: P) -> Self {
-        Self::Path(Input { path: path.into() })
+    pub fn input<P: Into<std::path::PathBuf>>(path: P) -> Input {
+        Input::new(path)
     }
 }
 
 impl Stdio<Output> {
-    pub fn create<P: Into<std::path::PathBuf>>(path: P) -> Self {
-        Self::Path(Output {
-            path: path.into(),
-            append: false,
-        })
-    }
-
-    pub fn append<P: Into<std::path::PathBuf>>(path: P) -> Self {
-        Self::Path(Output {
-            path: path.into(),
-            append: true,
-        })
+    pub fn output<P: Into<std::path::PathBuf>>(path: P) -> Output {
+        Output::new(path)
     }
 }
 
@@ -118,18 +133,18 @@ impl Options {
         self
     }
 
-    pub fn stdin(mut self, stdin: Stdio<Input>) -> Self {
-        self.stdin = Some(stdin);
+    pub fn stdin<I: Into<Stdio<Input>>>(mut self, stdin: I) -> Self {
+        self.stdin = Some(stdin.into());
         self
     }
 
-    pub fn stdout(mut self, stdout: Stdio<Output>) -> Self {
-        self.stdout = Some(stdout);
+    pub fn stdout<O: Into<Stdio<Output>>>(mut self, stdout: O) -> Self {
+        self.stdout = Some(stdout.into());
         self
     }
 
-    pub fn stderr(mut self, stderr: Stdio<Output>) -> Self {
-        self.stderr = Some(stderr);
+    pub fn stderr<O: Into<Stdio<Output>>>(mut self, stderr: O) -> Self {
+        self.stderr = Some(stderr.into());
         self
     }
 }
