@@ -30,9 +30,7 @@ impl std::convert::Into<Stdio<Input>> for Input {
 impl File for Input {
     fn open(&self) -> std::io::Result<std::fs::File> {
         if self.create {
-            if self.path.exists() && self.path.is_file() {
-                std::fs::File::create(&self.path)?;
-            }
+            std::fs::File::create(&self.path)?;
         }
 
         std::fs::File::open(&self.path)

@@ -13,37 +13,37 @@ type DaemonResult<T = ()> = Result<T, (DaemonError, nix::Error)>;
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Error {
-    #[error("daemon pid file already exists")]
+    #[error("Daemon pid file already exists")]
     DaemonAlreadyRunning,
 
-    #[error("failed to close file descriptors: {0}")]
+    #[error("Failed to close file descriptors: {0}")]
     CloseDescriptors(nix::Error),
 
-    #[error("failed to fetch open file descriptors: {0}")]
+    #[error("Failed to fetch open file descriptors: {0}")]
     ListOpenDescriptors(nix::Error),
 
-    #[error("failed to reset signal handlers: {0}")]
+    #[error("Failed to reset signal handlers: {0}")]
     ResetSignals(nix::Error),
 
-    #[error("failed to block signals: {0}")]
+    #[error("Failed to block signals: {0}")]
     BlockSignals(nix::Error),
 
-    #[error("failed to create status reporting pipe: {0}")]
+    #[error("Failed to create status reporting pipe: {0}")]
     CreatePipe(nix::Error),
 
-    #[error("failed to fork daemon process: {0}")]
+    #[error("Failed to fork daemon process: {0}")]
     Fork(nix::Error),
 
-    #[error("failed to receive daemon status report: {0}")]
+    #[error("Failed to receive daemon status report: {0}")]
     ReadStatus(nix::Error),
 
-    #[error("daemon failed to initialize: {error}: {cause}")]
+    #[error("Daemon failed to initialize: {error}: {cause}")]
     Daemon {
         error: DaemonError,
         cause: nix::Error,
     },
 
-    #[error("daemon sent failed heart beat: status code: {status}")]
+    #[error("Daemon sent failed heart beat: Status code: {status}")]
     Heartbeat { status: i32 },
 }
 
@@ -56,43 +56,43 @@ impl Error {
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum DaemonError {
-    #[error("failed heart beat")]
+    #[error("Failed heart beat")]
     Heartbeat = 1,
 
-    #[error("failed to detach from session")]
+    #[error("Failed to detach from session")]
     Setsid = 2,
 
-    #[error("failed to double fork daemon")]
+    #[error("Failed to double fork daemon")]
     Fork = 3,
 
-    #[error("failed to change root directory")]
+    #[error("Failed to change root directory")]
     ChangeRoot = 4,
 
-    #[error("failed to set user")]
+    #[error("Failed to set user")]
     SetUser = 5,
 
-    #[error("failed to set group")]
+    #[error("Failed to set group")]
     SetGroup = 6,
 
-    #[error("failed to unblock signals")]
+    #[error("Failed to unblock signals")]
     UnblockSignals = 7,
 
-    #[error("failed to close file descriptors")]
+    #[error("Failed to close file descriptors")]
     CloseDescriptors = 8,
 
-    #[error("failed to fetch open file descriptors")]
+    #[error("Failed to fetch open file descriptors")]
     ListOpenDescriptors = 9,
 
-    #[error("failed to reset signal handlers")]
+    #[error("Failed to reset signal handlers")]
     ResetSignals = 10,
 
-    #[error("failed to redirect stdin")]
+    #[error("Failed to redirect stdin")]
     RedirectStdin = 11,
 
-    #[error("failed to redirect stdout")]
+    #[error("Failed to redirect stdout")]
     RedirectStdout = 12,
 
-    #[error("failed to redirect stderr")]
+    #[error("Failed to redirect stderr")]
     RedirectStderr = 13,
 }
 
