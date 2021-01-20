@@ -1,4 +1,8 @@
 pub trait File {
+    /// Opens the file
+    ///
+    /// # Errors
+    /// If the file fails to be created or opened
     fn open(&self) -> std::io::Result<std::fs::File>;
 }
 
@@ -15,6 +19,7 @@ impl Input {
         }
     }
 
+    #[must_use]
     pub fn create(mut self) -> Self {
         self.create = true;
         self
@@ -50,6 +55,7 @@ impl Output {
         }
     }
 
+    #[must_use]
     pub fn append(mut self) -> Self {
         self.append = true;
         self
@@ -112,35 +118,45 @@ impl Options {
         }
     }
 
+    /// Starts the daemon
+    ///
+    /// # Errors
+    /// If the daemonizing operation fails
     pub fn daemonize(self) -> super::InvocationResult<super::Heartbeat> {
         super::daemonize_inner(self)
     }
 
+    #[must_use]
     pub fn user(mut self, user: nix::unistd::User) -> Self {
         self.user = Some(user);
         self
     }
 
+    #[must_use]
     pub fn group(mut self, group: nix::unistd::Group) -> Self {
         self.group = Some(group);
         self
     }
 
+    #[must_use]
     pub fn root<P: Into<std::path::PathBuf>>(mut self, root: P) -> Self {
         self.root = root.into();
         self
     }
 
+    #[must_use]
     pub fn stdin<I: Into<Stdio<Input>>>(mut self, stdin: I) -> Self {
         self.stdin = Some(stdin.into());
         self
     }
 
+    #[must_use]
     pub fn stdout<O: Into<Stdio<Output>>>(mut self, stdout: O) -> Self {
         self.stdout = Some(stdout.into());
         self
     }
 
+    #[must_use]
     pub fn stderr<O: Into<Stdio<Output>>>(mut self, stderr: O) -> Self {
         self.stderr = Some(stderr.into());
         self

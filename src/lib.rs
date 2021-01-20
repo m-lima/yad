@@ -102,10 +102,15 @@ enum ForkResult {
     Daemon(Pipe),
 }
 
+/// Starts the daemon
+///
+/// # Errors
+/// If the daemonizing operation fails
 pub fn daemonize() -> InvocationResult<Heartbeat> {
     daemonize_inner(options::Options::new())
 }
 
+#[must_use]
 pub fn with_options() -> options::Options {
     options::Options::new()
 }
@@ -129,6 +134,8 @@ fn daemonize_inner(options: options::Options) -> InvocationResult<Heartbeat> {
 }
 
 fn close_descriptors() -> InvocationResult {
+    // Allowed because of the filter_map flow
+    #[allow(clippy::needless_pass_by_value)]
     fn file_to_fd(entry: std::fs::DirEntry) -> Option<i32> {
         entry
             .file_name()
@@ -145,7 +152,7 @@ fn close_descriptors() -> InvocationResult {
                 .filter_map(file_to_fd)
                 .filter(|fd| fd > &2)
             {
-                nix::unistd::close(fd).map_err(|err| Error::CloseDescriptors(err.into()))?
+                nix::unistd::close(fd).map_err(Error::CloseDescriptors)?
             }
             Ok(())
         }
@@ -156,12 +163,13 @@ fn close_descriptors() -> InvocationResult {
 fn reset_signals() -> InvocationResult {
     use nix::sys::signal as nix;
 
+    // Allowed because it is just more readable
+    #[allow(clippy::filter_map)]
     nix::Signal::iterator()
         .filter(|signal| signal != &nix::SIGKILL && signal != &nix::SIGSTOP)
         .map(|signal| unsafe { nix::signal(signal, nix::SigHandler::SigDfl) })
-        .filter_map(Result::err)
-        .next()
-        .map_or(Ok(()), |err| Err(Error::ResetSignals(err.into())))
+        .find_map(Result::err)
+        .map_or(Ok(()), |err| Err(Error::ResetSignals(err)))
 }
 
 fn block_signals() -> InvocationResult {
@@ -230,22 +238,6 @@ fn redirect_streams(
     use std::os::unix::io::{AsRawFd, RawFd};
     use DaemonError::{RedirectStderr, RedirectStdin, RedirectStdout};
 
-    let mut devnull = None::<std::fs::File>;
-
-    let mut devnull_fd = |error: DaemonError| -> DaemonResult<RawFd> {
-        if devnull.is_none() {
-            devnull = Some(
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open("/dev/null")
-                    .map_err(|_| (error, nix::Error::last()))?,
-            );
-        }
-
-        Ok(devnull.as_ref().unwrap().as_raw_fd())
-    };
-
     fn redirect_stream<D, F>(
         devnull_fd: &mut D,
         stdio: Option<options::Stdio<F>>,
@@ -262,16 +254,36 @@ fn redirect_streams(
                 options::Stdio::Null => devnull_fd(error)?,
                 options::Stdio::Fd(fd) => fd,
                 options::Stdio::File(file) => {
-                    let file = file.open().map_err(|_| (error, nix::Error::last()))?;
-                    let fd = file.as_raw_fd();
-                    std::mem::forget(file);
-                    fd
+                    // Allowed because we grab the error from OS
+                    #[allow(clippy::map_err_ignore)]
+                    let open_file = file.open().map_err(|_| (error, nix::Error::last()))?;
+                    let raw_fd = open_file.as_raw_fd();
+                    std::mem::forget(open_file);
+                    raw_fd
                 }
             };
             nix::unistd::dup2(fd, new_fd).map_err(|err| (error, err))?;
         }
         Ok(())
     }
+
+    let mut devnull = None::<std::fs::File>;
+
+    let mut devnull_fd = |error: DaemonError| -> DaemonResult<RawFd> {
+        // Allowed because we grab the error from OS
+        #[allow(clippy::map_err_ignore)]
+        if devnull.is_none() {
+            devnull = Some(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open("/dev/null")
+                    .map_err(|_| (error, nix::Error::last()))?,
+            );
+        }
+
+        Ok(devnull.as_ref().unwrap().as_raw_fd())
+    };
 
     redirect_stream(&mut devnull_fd, stdin, STDIN_FILENO, RedirectStdin)?;
     redirect_stream(&mut devnull_fd, stdout, STDOUT_FILENO, RedirectStdout)?;
@@ -295,16 +307,16 @@ impl Pipe {
     fn new() -> InvocationResult<Self> {
         nix::unistd::pipe()
             .map(|(reader, writer)| Self { reader, writer })
-            .map_err(|err| Error::CreatePipe(err.into()))
+            .map_err(Error::CreatePipe)
     }
 
     fn read(self) -> InvocationResult<Self> {
-        let mut status = [0u8];
+        let mut status = [0_u8];
         nix::unistd::read(self.reader, &mut status).map_err(Error::ReadStatus)?;
         if status[0] == 0 {
             Ok(self)
         } else {
-            let mut error = [0u8; 4];
+            let mut error = [0_u8; 4];
             nix::unistd::read(self.reader, &mut error).map_err(Error::ReadStatus)?;
             let error = i32::from_be_bytes(error);
 
