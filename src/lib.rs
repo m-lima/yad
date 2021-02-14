@@ -1,5 +1,4 @@
-#![deny(warnings)]
-#![deny(clippy::pedantic)]
+#![deny(warnings, missing_docs, clippy::pedantic)]
 #![warn(rust_2018_idioms)]
 #![cfg(target_family = "unix")]
 
