@@ -262,7 +262,7 @@ fn redirect_streams(
                     raw_fd
                 }
             };
-            nix::unistd::dup2(fd, new_fd).map_err(|err| (error, err))?;
+            nix::unistd::dup2(new_fd, fd).map_err(|err| (error, err))?;
         }
         Ok(())
     }
@@ -379,12 +379,4 @@ fn exit_error(pipe: Pipe, error: DaemonError, cause: nix::Error) -> ! {
     let errno = cause.as_errno().map_or(-1, |errno| errno as i32);
     pipe.error(error, errno);
     std::process::exit(errno);
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }
