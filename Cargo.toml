@@ -3,6 +3,12 @@ name = "yad"
 version = "0.1.0"
 authors = ["Marcelo Lima <marcelowind@gmail.com>"]
 edition = "2018"
+readme = "README.md"
+keywords = ["daemon", "process", "unix"]
+repository = "https://github.com/m-lima/yad"
+categories = ["os", "os::unix-apis", "os::macos-apis", "os::linux-apis", "os::freebsd-apis"]
+description = "Yet Another Daemonizer is a daemonizing crate to easily, simply, and correctly create legacy daemons"
+license = "MIT"
 
 [dependencies]
 nix = "0.19"
