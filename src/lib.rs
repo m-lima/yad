@@ -11,14 +11,16 @@
 //!
 //! # Example
 //! ```no_run
+//! use yad::options::Stdio;
+//!
 //! match yad::with_options()
-//!     .stdin(yad::options::Stdio::Null)
-//!     .stderr(yad::options::Stdio::Null)
-//!     .stdout(yad::options::Stdio::output("/var/log/daemon.log"))
+//!     .stdin(Stdio::Null)
+//!     .stderr(Stdio::Null)
+//!     .stdout(Stdio::output("/var/log/daemon.log"))
 //!     .daemonize()
 //! {
 //!     Ok(_) => println!("I'm a daemon"),
-//!     Err(err) => eprintln!("Failed to lauch daemon: {}", err),
+//!     Err(err) => eprintln!("Failed to launch daemon: {}", err),
 //! }
 //! ```
 //!
@@ -33,7 +35,7 @@ type DaemonResult<T = ()> = Result<T, (DaemonError, nix::Error)>;
 
 /// Errors that can happen while daemonizing.
 ///
-/// These errors are received in the invoking process, i.e. the proccess that called `daemonize()`.
+/// These errors are received in the invoking process, i.e. the proccess that called [`daemonize()`](fn.daemonize.html).
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Error {
     /// Daemon pid file already exists
@@ -68,10 +70,10 @@ pub enum Error {
     #[error("Failed to receive daemon status report: {0}")]
     ReadStatus(nix::Error),
 
-    /// Failed to start daemon after forking
+    /// Failed to start daemon after forking with a wrapped [`DaemonError`](enum.DaemonError.html)
     #[error("Daemon failed to initialize: {error}: {cause}")]
     Daemon {
-        /// The received error
+        /// The wrapped error sent by the forked process
         error: DaemonError,
         /// The raw underlying error
         cause: nix::Error,
@@ -91,14 +93,17 @@ impl Error {
     }
 }
 
-/// Errors that can happen after the daemon has forked.
+/// Wrapped errors that can happen after the daemon has forked.
 ///
 /// The error is reported by another process through pipes and received by the invoking process,
-/// i.e. the process that called `daemonize()`, will handle the error.
+/// i.e. the process that called [`daemonize()`](fn.daemonize.html), will handle the error.
 ///
 /// The forked process will be guaranteed to be stopped, unless the error is a
 /// [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the forked process is
 /// responsible for terminating after cleaning up.
+///
+/// # See also
+/// [`Error`](enum.Error.html)
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum DaemonError {
@@ -167,17 +172,20 @@ enum ForkResult {
 /// ```no_run
 /// match yad::daemonize() {
 ///     Ok(_) => println!("I'm a daemon"),
-///     Err(err) => eprintln!("Failed to lauch daemon: {}", err),
+///     Err(err) => eprintln!("Failed to launch daemon: {}", err),
 /// }
 /// ```
 ///
 /// # Errors
 /// If the daemonizing operation fails.
 ///
-/// The invoking process, i.e. the process that called `daemonize()`, will handle the
-/// error. The forked process will be guaranteed to be stopped, unless the error is a
-/// [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the forked process is
-/// responsible for terminating after cleaning up.
+/// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
+/// will handle the error. The forked process will be guaranteed to be stopped, unless the
+/// error is a [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the
+/// forked process is responsible for terminating after cleaning up.
+///
+/// # See also
+/// [`with_options()`](fn.with_options.html)
 pub fn daemonize() -> InvocationResult<Heartbeat> {
     daemonize_inner(options::Options::new())
 }
@@ -186,24 +194,30 @@ pub fn daemonize() -> InvocationResult<Heartbeat> {
 ///
 /// # Example
 /// ```no_run
+/// use yad::options::Stdio;
+///
 /// match yad::with_options()
-///     .stdin(yad::options::Stdio::Null)
-///     .stderr(yad::options::Stdio::Null)
-///     .stdout(yad::options::Stdio::output("/var/log/daemon.log"))
+///     .stdin(Stdio::Null)
+///     .stderr(Stdio::Null)
+///     .stdout(Stdio::output("/var/log/daemon.log"))
 ///     .daemonize()
 /// {
 ///     Ok(_) => println!("I'm a daemon"),
-///     Err(err) => eprintln!("Failed to lauch daemon: {}", err),
+///     Err(err) => eprintln!("Failed to launch daemon: {}", err),
 /// }
 /// ```
 ///
 /// # Errors
 /// If the daemonizing operation fails.
 ///
-/// The invoking process, i.e. the process that called `daemonize()`, will handle the
+/// The invoking process, i.e. the process that called
+/// [`daemonize()`](options/struct.Options.html#method.daemonize), will handle the
 /// error. The forked process will be guaranteed to be stopped, unless the error is a
 /// [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the forked process is
 /// responsible for terminating after cleaning up.
+///
+/// # See also
+/// [`daemonize()`](fn.daemonize.html)
 #[must_use]
 pub fn with_options() -> options::Options {
     options::Options::new()

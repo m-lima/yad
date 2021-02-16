@@ -4,19 +4,21 @@
 //! ```no_run
 //! match yad::daemonize() {
 //!     Ok(_) => println!("I'm a daemon"),
-//!     Err(err) => eprintln!("Failed to lauch daemon: {}", err),
+//!     Err(err) => eprintln!("Failed to launch daemon: {}", err),
 //! }
 //! ```
 //!
 //! ```no_run
+//! use yad::options::Stdio;
+//!
 //! match yad::with_options()
-//!     .stdin(yad::options::Stdio::Null)
-//!     .stderr(yad::options::Stdio::Null)
-//!     .stdout(yad::options::Stdio::output("/var/log/daemon.log"))
+//!     .stdin(Stdio::Null)
+//!     .stderr(Stdio::Null)
+//!     .stdout(Stdio::output("/var/log/daemon.log"))
 //!     .daemonize()
 //! {
 //!     Ok(_) => println!("I'm a daemon"),
-//!     Err(err) => eprintln!("Failed to lauch daemon: {}", err),
+//!     Err(err) => eprintln!("Failed to launch daemon: {}", err),
 //! }
 //! ```
 
