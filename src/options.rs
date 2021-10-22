@@ -53,9 +53,9 @@ impl Input {
     }
 }
 
-impl std::convert::Into<Stdio<Input>> for Input {
-    fn into(self) -> Stdio<Input> {
-        Stdio::File(self)
+impl std::convert::From<Input> for Stdio<Input> {
+    fn from(input: Input) -> Self {
+        Self::File(input)
     }
 }
 
@@ -91,9 +91,9 @@ impl Output {
     }
 }
 
-impl std::convert::Into<Stdio<Output>> for Output {
-    fn into(self) -> Stdio<Output> {
-        Stdio::File(self)
+impl std::convert::From<Output> for Stdio<Output> {
+    fn from(output: Output) -> Self {
+        Self::File(output)
     }
 }
 

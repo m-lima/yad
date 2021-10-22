@@ -260,19 +260,17 @@ fn close_descriptors() -> InvocationResult {
                 .filter_map(file_to_fd)
                 .filter(|fd| fd > &2)
             {
-                nix::unistd::close(fd).map_err(Error::CloseDescriptors)?
+                nix::unistd::close(fd).map_err(Error::CloseDescriptors)?;
             }
             Ok(())
         }
-        Err(_) => Err(Error::ListOpenDescriptors(nix::errno::Errno::last().into())),
+        Err(_) => Err(Error::ListOpenDescriptors(nix::errno::Errno::last())),
     }
 }
 
 fn reset_signals() -> InvocationResult {
     use nix::sys::signal as nix;
 
-    // Allowed because it is just more readable
-    #[allow(clippy::filter_map)]
     nix::Signal::iterator()
         .filter(|signal| signal != &nix::SIGKILL && signal != &nix::SIGSTOP)
         .map(|signal| unsafe { nix::signal(signal, nix::SigHandler::SigDfl) })
@@ -362,8 +360,6 @@ fn redirect_streams(
                 options::Stdio::Null => devnull_fd(error)?,
                 options::Stdio::Fd(fd) => fd,
                 options::Stdio::File(file) => {
-                    // Allowed because we grab the error from OS
-                    #[allow(clippy::map_err_ignore)]
                     let open_file = file.open().map_err(|_| (error, nix::Error::last()))?;
                     let raw_fd = open_file.as_raw_fd();
                     std::mem::forget(open_file);
@@ -378,8 +374,6 @@ fn redirect_streams(
     let mut devnull = None::<std::fs::File>;
 
     let mut devnull_fd = |error: DaemonError| -> DaemonResult<RawFd> {
-        // Allowed because we grab the error from OS
-        #[allow(clippy::map_err_ignore)]
         if devnull.is_none() {
             devnull = Some(
                 std::fs::OpenOptions::new()
@@ -433,7 +427,7 @@ impl Pipe {
             } else {
                 Err(Error::daemon(
                     unsafe { std::mem::transmute::<u8, DaemonError>(status[0]) },
-                    nix::Error::from_errno(nix::errno::from_i32(error)),
+                    nix::errno::from_i32(error),
                 ))
             }
         }
@@ -444,13 +438,10 @@ impl Pipe {
     }
 
     fn error(self, error: DaemonError, errno: i32) {
-        let errno = errno.to_be();
-        let errno_ptr = (&errno as *const i32) as *const u8;
+        let errno_ptr = unsafe { std::mem::transmute::<i32, [u8; 4]>(errno.to_be()) };
 
         let _ = nix::unistd::write(self.writer, &[error as u8]);
-        let _ = nix::unistd::write(self.writer, unsafe {
-            std::slice::from_raw_parts(errno_ptr, 4)
-        });
+        let _ = nix::unistd::write(self.writer, &errno_ptr);
     }
 }
 
@@ -601,7 +592,17 @@ fn exit_success(pipe: Pipe) -> ! {
 }
 
 fn exit_error(pipe: Pipe, error: DaemonError, cause: nix::Error) -> ! {
-    let errno = cause.as_errno().map_or(-1, |errno| errno as i32);
-    pipe.error(error, errno);
-    std::process::exit(errno);
+    pipe.error(error, cause as i32);
+    std::process::exit(cause as i32);
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn to_big_endian() {
+        let int: i32 = 0x09ab_cdef;
+        let array = unsafe { std::mem::transmute::<i32, [u8; 4]>(int.to_be()) };
+
+        assert_eq!(array, [0x09, 0xab, 0xcd, 0xef]);
+    }
 }
