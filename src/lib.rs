@@ -438,7 +438,7 @@ impl Pipe {
     }
 
     fn error(self, error: DaemonError, errno: i32) {
-        let errno_ptr = unsafe { std::mem::transmute::<i32, [u8; 4]>(errno.to_be()) };
+        let errno_ptr = errno.to_be_bytes();
 
         let _ = nix::unistd::write(self.writer, &[error as u8]);
         let _ = nix::unistd::write(self.writer, &errno_ptr);
@@ -601,7 +601,7 @@ mod test {
     #[test]
     fn to_big_endian() {
         let int: i32 = 0x09ab_cdef;
-        let array = unsafe { std::mem::transmute::<i32, [u8; 4]>(int.to_be()) };
+        let array = int.to_be_bytes();
 
         assert_eq!(array, [0x09, 0xab, 0xcd, 0xef]);
     }
