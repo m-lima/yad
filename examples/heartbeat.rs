@@ -1,4 +1,4 @@
-use yad::Heartbeat;
+use yad::{options::Stdio, Heartbeat};
 
 struct Error;
 impl Error {
@@ -65,7 +65,10 @@ fn daemonize_fail_explicit() -> Result<(), yad::Error> {
 }
 
 fn daemonize_fail_implicit() -> Result<(), yad::Error> {
-    let heartbeat = yad::daemonize()?;
+    let heartbeat = yad::with_options()
+        .stdout(Stdio::Null)
+        .stderr(Stdio::Null)
+        .daemonize()?;
     daemon_process_fail_implicit(heartbeat).map_err(|e| yad::Error::Heartbeat {
         status: e.as_errno(),
     })
@@ -79,7 +82,7 @@ enum Flow {
 }
 
 impl Flow {
-    fn from(string: String) -> Option<Self> {
+    fn parse(string: String) -> Option<Self> {
         match string.trim().to_lowercase().as_str() {
             "ok-explicit" => Some(Self::OkExplicit),
             "ok-implicit" => Some(Self::OkImplicit),
@@ -88,13 +91,30 @@ impl Flow {
             _ => None,
         }
     }
+
+    fn run(self) -> Result<(), yad::Error> {
+        match self {
+            Flow::OkExplicit => daemonize_ok_explicit(),
+            Flow::OkImplicit => daemonize_ok_implicit(),
+            Flow::FailExplicit => daemonize_fail_explicit(),
+            Flow::FailImplicit => daemonize_fail_implicit(),
+        }
+    }
+}
+
+fn show_usage() {
+    eprintln!("Expected a mode argument:");
+    eprintln!("  ok-explicit");
+    eprintln!("  ok-implicit");
+    eprintln!("  fail-explicit");
+    eprintln!("  fail-implicit");
 }
 
 fn main() -> Result<(), yad::Error> {
-    match std::env::args().nth(1).and_then(Flow::from).unwrap() {
-        Flow::OkExplicit => daemonize_ok_explicit(),
-        Flow::OkImplicit => daemonize_ok_implicit(),
-        Flow::FailExplicit => daemonize_fail_explicit(),
-        Flow::FailImplicit => daemonize_fail_implicit(),
+    if let Some(flow) = std::env::args().nth(1).and_then(Flow::parse) {
+        flow.run()
+    } else {
+        show_usage();
+        std::process::exit(1);
     }
 }
