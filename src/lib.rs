@@ -1,5 +1,4 @@
-#![deny(warnings, missing_docs, clippy::pedantic)]
-#![warn(rust_2018_idioms)]
+#![deny(warnings, missing_docs, rust_2018_idioms, clippy::pedantic)]
 #![cfg(target_family = "unix")]
 
 //! Yet Another Daemonizer is a daemonizing crate to easily, simply, and **correctly** create legacy
