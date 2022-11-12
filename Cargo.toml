@@ -2,7 +2,7 @@
 name = "yad"
 version = "0.1.2"
 authors = ["Marcelo Lima <marcelowind@gmail.com>"]
-edition = "2018"
+edition = "2021"
 readme = "README.md"
 keywords = ["daemon", "process", "unix"]
 repository = "https://github.com/m-lima/yad"
@@ -13,3 +13,4 @@ license = "MIT"
 [dependencies]
 nix = "0.25"
 thiserror = "1"
+yad-derive = { path = "yad-derive" }

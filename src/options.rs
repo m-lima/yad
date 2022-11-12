@@ -159,17 +159,51 @@ impl Options {
     /// Starts the daemon.
     ///
     /// When this method returns, if it is a failure, it is guaranteed to be running on the
-    /// original process. If it is a success, it is guaranteed to be running as a daemon and the
-    /// calling process is either waiting for a [`heartbeat`](struct.Heartbeat.html) or terminated.
+    /// original process. If it is a success, it is guaranteed to be running as a daemon.
     ///
     /// # Errors
-    /// If the daemon fails to start.
+    /// If the daemonizing operation fails.
     ///
-    /// The forked process will be guaranteed to be stopped, unless the error is a
-    /// [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the forked process is
-    /// responsible for terminating after cleaning up.
-    pub fn daemonize(self) -> super::InvocationResult<super::Heartbeat> {
-        super::daemonize_inner(self)
+    /// The invoking process, i.e. the process that called
+    /// [`daemonize()`](struct.Options.html#method.daemonize), will handle the error. The forked
+    /// process will be guaranteed to be terminated and the invoking process will own all resources.
+    ///
+    /// # See also
+    /// [`daemonize()`](fn.daemonize.html)
+    pub fn daemonize(self) -> super::InvocationResult {
+        super::daemonize_inner(self, || Ok(()))
+    }
+
+    /// Starts the daemon with default options executing `initialization` after forking the process.
+    ///
+    /// When this method returns, if it is a failure, it is guaranteed to be running on the
+    /// original process. If it is a success, it is guaranteed to be running as a daemon.
+    ///
+    /// Therefore, when this method returns, if it is a failure, it is guaranteed to be running on
+    /// the original process. If it is a success, it is guaranteed to be running as a daemon.
+    ///
+    /// If the initialization fails, the error will be converted to an `i32` representation and sent
+    /// though the pipe back to the invoking process. The forked daemon will unwind its
+    /// initialization stack, and terminate without unwind any further. The invoking process will
+    /// own all shared resources.
+    ///
+    /// # Errors
+    /// If the daemonizing operation fails or if the initialization fails.
+    ///
+    /// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
+    /// will handle the error. The forked process will be guaranteed to be terminated and the
+    /// invoking process will own all resources.
+    ///
+    /// Any resources acquired during `initialization` execution will be owned just by the forked
+    /// process and will be unwound and dropped upon error.
+    ///
+    /// # See also
+    /// [`daemonize_with_init()`](fn.daemonize_with_init.html)
+    pub fn daemonize_with_init<F, R>(self, initialization: F) -> super::InvocationResult<R>
+    where
+        F: FnOnce() -> Result<R, super::ErrorCode>,
+    {
+        super::daemonize_inner(self, initialization)
     }
 
     /// Sets the UID for the daemon.

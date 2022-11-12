@@ -34,8 +34,9 @@ type DaemonResult<T = ()> = Result<T, (DaemonError, nix::Error)>;
 
 /// Errors that can happen while daemonizing.
 ///
-/// These errors are received in the invoking process, i.e. the proccess that called [`daemonize()`](fn.daemonize.html).
-#[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
+/// These errors are received in the invoking process, i.e. the proccess that called
+/// [`daemonize()`](fn.daemonize.html).
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Error {
     /// Daemon pid file already exists
     #[error("Daemon pid file already exists")]
@@ -78,11 +79,11 @@ pub enum Error {
         cause: nix::Error,
     },
 
-    /// The [`Heartbeat`](struct.Heartbeat.html) from the daemon reported an error
-    #[error("Daemon sent failed heart beat: Status code: {status}")]
-    Heartbeat {
-        /// The status code reported back by the daemon
-        status: i32,
+    /// Failure after daemonizing while initializing
+    #[error("Daemon failed to initialize: {code}")]
+    Initialization {
+        /// The received numeric representation of the error
+        code: ErrorCode,
     },
 }
 
@@ -92,71 +93,89 @@ impl Error {
     }
 }
 
+/// An error that occurs during initialization that can be represented as an `i32` and sent through
+/// the pipe back to the invoking process error handling.
+///
+/// The is the expected error returned from [`daemonize_with_init()`](fn.daemonize_with_init.html).
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ErrorCode(pub i32);
+
+impl<I: Into<i32>> From<I> for ErrorCode {
+    fn from(code: I) -> Self {
+        Self(code.into())
+    }
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Wrapped errors that can happen after the daemon has forked.
 ///
 /// The error is reported by another process through pipes and received by the invoking process,
 /// i.e. the process that called [`daemonize()`](fn.daemonize.html), will handle the error.
 ///
-/// The forked process will be guaranteed to be stopped, unless the error is a
-/// [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the forked process is
-/// responsible for terminating after cleaning up.
+/// The forked process will be guaranteed to be terminated and the invoking process will own all
+/// resources.
 ///
 /// # See also
 /// [`Error`](enum.Error.html)
-#[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(thiserror::Error, yad_derive::FromNum, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum DaemonError {
-    /// The [`Heartbeat`](struct.Heartbeat.html) from the daemon reported an error
-    #[error("Failed heart beat")]
-    Heartbeat = 1,
-
     /// Failure detaching from session
     #[error("Failed to detach from session")]
-    Setsid = 2,
+    Setsid = 1,
 
     /// Failure during the second call to `fork()`
     #[error("Failed to double fork daemon")]
-    Fork = 3,
+    Fork = 2,
 
     /// Failure changing root directory
     #[error("Failed to change root directory")]
-    ChangeRoot = 4,
+    ChangeRoot = 3,
 
     /// Failure setting UID
     #[error("Failed to set user")]
-    SetUser = 5,
+    SetUser = 4,
 
     /// Failure setting GID
     #[error("Failed to set group")]
-    SetGroup = 6,
+    SetGroup = 5,
 
     /// Failure unblocking the signals
     #[error("Failed to unblock signals")]
-    UnblockSignals = 7,
+    UnblockSignals = 6,
 
     /// Failure closing file descriptors
     #[error("Failed to close file descriptors")]
-    CloseDescriptors = 8,
+    CloseDescriptors = 7,
 
     /// Failure listing open file descriptors
     #[error("Failed to fetch open file descriptors")]
-    ListOpenDescriptors = 9,
+    ListOpenDescriptors = 8,
 
     /// Failure resetting signal handlers
     #[error("Failed to reset signal handlers")]
-    ResetSignals = 10,
+    ResetSignals = 9,
 
     /// Failure redirecting STDIN
     #[error("Failed to redirect stdin")]
-    RedirectStdin = 11,
+    RedirectStdin = 10,
 
     /// Failure redirecting STDOUT
     #[error("Failed to redirect stdout")]
-    RedirectStdout = 12,
+    RedirectStdout = 11,
 
     /// Failure redirecting STDERR
     #[error("Failed to redirect stderr")]
-    RedirectStderr = 13,
+    RedirectStderr = 12,
+
+    /// Failure after daemonizing while initializing
+    #[error("Failed initialize daemon after forking")]
+    Initialization = 13,
 }
 
 #[derive(Debug)]
@@ -166,6 +185,9 @@ enum ForkResult {
 }
 
 /// Starts the daemon with default options.
+///
+/// When this method returns, if it is a failure, it is guaranteed to be running on the
+/// original process. If it is a success, it is guaranteed to be running as a daemon.
 ///
 /// # Example
 /// ```no_run
@@ -179,14 +201,69 @@ enum ForkResult {
 /// If the daemonizing operation fails.
 ///
 /// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
-/// will handle the error. The forked process will be guaranteed to be stopped, unless the
-/// error is a [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the
-/// forked process is responsible for terminating after cleaning up.
+/// will handle the error. The forked process will be guaranteed to be terminated and the invoking
+/// process will own all resources.
 ///
 /// # See also
 /// [`with_options()`](fn.with_options.html)
-pub fn daemonize() -> InvocationResult<Heartbeat> {
-    daemonize_inner(options::Options::new())
+pub fn daemonize() -> InvocationResult {
+    daemonize_inner(options::Options::new(), || Ok(()))
+}
+
+/// Starts the daemon with default options executing `initialization` after forking the process.
+///
+/// When this method returns, if it is a failure, it is guaranteed to be running on the
+/// original process. If it is a success, it is guaranteed to be running as a daemon.
+///
+/// If the initialization fails, the error will be converted to an `i32` representation and sent
+/// though the pipe back to the invoking process. The forked daemon will unwind its initialization
+/// stack, and terminate without unwind any further. The invoking process will own all shared
+/// resources.
+///
+/// Therefore, when this method returns, if it is a failure, it is guaranteed to be running on the
+/// original process. If it is a success, it is guaranteed to be running as a daemon.
+///
+/// # Example
+/// ```no_run
+/// #[repr(u8)]
+/// enum Error {
+///     Read = 1,
+///     Write = 2,
+/// }
+///
+/// impl From<Error> for i32 {
+///     fn from(e: Error) -> Self {
+///         e as i32
+///     }
+/// }
+///
+/// match yad::daemonize_with_init(|| {
+///     let file = std::fs::open("a_file").map_err(|_| Error::Read)?;
+///     std:;fs::write("another_file", b"some_content").map_err(|_| Error::Write)?;
+///     Ok(file)
+/// }) {
+///     Ok(file) => println!("I'm a daemon with {file:?}"),
+///     Err(err) => eprintln!("Failed to launch daemon: {}", err),
+/// }
+/// ```
+///
+/// # Errors
+/// If the daemonizing operation fails or if the initialization fails.
+///
+/// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
+/// will handle the error. The forked process will be guaranteed to be terminated and the invoking
+/// process will own all resources.
+///
+/// Any resources acquired during `initialization` execution will be owned just by the forked
+/// process and will be unwound and dropped upon error.
+///
+/// # See also
+/// [`with_options()`](fn.with_options.html)
+pub fn daemonize_with_init<F, R>(initialization: F) -> InvocationResult<R>
+where
+    F: FnOnce() -> Result<R, ErrorCode>,
+{
+    daemonize_inner(options::Options::new(), initialization)
 }
 
 /// Starts the daemon with the given options.
@@ -206,15 +283,6 @@ pub fn daemonize() -> InvocationResult<Heartbeat> {
 /// }
 /// ```
 ///
-/// # Errors
-/// If the daemonizing operation fails.
-///
-/// The invoking process, i.e. the process that called
-/// [`daemonize()`](options/struct.Options.html#method.daemonize), will handle the
-/// error. The forked process will be guaranteed to be stopped, unless the error is a
-/// [`Heartbeat`](enum.DaemonError.html#variant.Heartbeat), in which case the forked process is
-/// responsible for terminating after cleaning up.
-///
 /// # See also
 /// [`daemonize()`](fn.daemonize.html)
 #[must_use]
@@ -222,21 +290,33 @@ pub fn with_options() -> options::Options {
     options::Options::new()
 }
 
-fn daemonize_inner(options: options::Options) -> InvocationResult<Heartbeat> {
+fn daemonize_inner<F, R>(options: options::Options, initialization: F) -> InvocationResult<R>
+where
+    F: FnOnce() -> Result<R, ErrorCode>,
+{
     close_descriptors()?;
     reset_signals()?;
     block_signals()?;
     let pipe = Pipe::new()?;
 
     match fork(pipe)? {
-        ForkResult::Invoker(pipe, child) => match finalize_invoker(pipe, child) {
-            Ok(_) => std::process::exit(0),
-            Err(err) => Err(err),
-        },
-        ForkResult::Daemon(pipe) => match finalize_daemon(options) {
-            Ok(_) => Ok(Heartbeat(Some(pipe), false)),
-            Err((error, cause)) => exit_error(pipe, error, cause),
-        },
+        ForkResult::Invoker(pipe, child) => {
+            finalize_invoker(pipe, child)?;
+            std::process::exit(0);
+        }
+        ForkResult::Daemon(pipe) => {
+            if let Err((error, cause)) = finalize_daemon(options) {
+                exit_error(pipe, error, cause);
+            } else {
+                match initialization() {
+                    Ok(r) => {
+                        pipe.ok();
+                        Ok(r)
+                    }
+                    Err(e) => exit_error(pipe, DaemonError::Initialization, e),
+                }
+            }
+        }
     }
 }
 
@@ -421,19 +501,17 @@ impl Pipe {
             nix::unistd::read(self.reader, &mut error).map_err(Error::ReadStatus)?;
             let error = i32::from_be_bytes(error);
 
-            if status[0] == DaemonError::Heartbeat as u8 {
-                Err(Error::Heartbeat { status: error })
-            } else {
-                Err(Error::daemon(
-                    unsafe { std::mem::transmute::<u8, DaemonError>(status[0]) },
-                    nix::errno::from_i32(error),
-                ))
+            match DaemonError::from_num(status[0]) {
+                Some(DaemonError::Initialization) | None => {
+                    Err(Error::Initialization { code: error.into() })
+                }
+                Some(e) => Err(Error::daemon(e, nix::errno::from_i32(error))),
             }
         }
     }
 
-    fn write(self, status: u8) {
-        let _ = nix::unistd::write(self.writer, &[status]);
+    fn ok(self) {
+        let _ = nix::unistd::write(self.writer, &[0]);
     }
 
     fn error(self, error: DaemonError, errno: i32) {
@@ -444,164 +522,67 @@ impl Pipe {
     }
 }
 
-/// Allows reporting back to the invoker process if the initialization of the service was
-/// successful or not.
-///
-/// The heartbeat is sent after the daemonizing process has succeeded and it is reported back by
-/// the daemon itself. This is, therefore, a means of reporting a healthy running daemon after all
-/// configuration.
-///
-/// The struct will automatically send a success signal when it gets dropped. This behavior can be
-/// changed by setting [`fail_on_drop`](struct.Heartbeat.html#method.fail_on_drop), which is useful
-/// when using the `?` error propagation early exit.
-///
-/// # Example
-///
-/// ### Reporting heartbeat on drop
-/// **Infallible:**
-/// ```no_run
-/// # use yad::Heartbeat;
-/// fn daemon_process() -> ! {
-///     loop {
-///         println!("loooooooooop");
-///     }
-/// }
-///
-/// fn start() -> Result<(), yad::Error> {
-///     yad::daemonize()?;
-///     daemon_process();
-/// }
-/// ```
-///
-/// **Fallible:**
-/// ```no_run
-/// # use yad::Heartbeat;
-/// # fn setup_daemon() -> Result<(), yad::Error> {
-/// #     Err(yad::Error::Heartbeat{ status: 1 })
-/// # }
-/// fn daemon_process(mut heartbeat: Heartbeat) -> Result<(), yad::Error> {
-///     heartbeat.fail_on_drop();
-///     setup_daemon()?;
-///     heartbeat.ok();
-///
-///     loop {
-///         println!("loooooooooop");
-///     }
-/// }
-///
-/// fn start() -> Result<(), yad::Error> {
-///     let heartbeat = yad::daemonize()?;
-///     daemon_process(heartbeat)
-/// }
-/// ```
-///
-/// ### Explicitly reporting heartbeat
-///
-/// **Infallible:**
-/// ```no_run
-/// # use yad::Heartbeat;
-/// fn daemon_process(heartbeat: Heartbeat) -> ! {
-///     heartbeat.ok();
-///     loop {
-///         println!("loooooooooop");
-///     }
-/// }
-///
-/// fn start() -> Result<(), yad::Error> {
-///     let heartbeat = yad::daemonize()?;
-///     daemon_process(heartbeat);
-/// }
-/// ```
-///
-/// **Fallible:**
-/// ```no_run
-/// # use yad::Heartbeat;
-/// # struct Error;
-/// # impl Error {
-/// #   fn as_errno(&self) -> i32 {
-/// #       1
-/// #   }
-/// # }
-/// # fn setup_daemon() -> Result<(), Error> {
-/// #     Err(Error)
-/// # }
-/// fn daemon_process(heartbeat: Heartbeat) -> ! {
-///     match setup_daemon() {
-///         Ok(_) => heartbeat.ok(),
-///         Err(err) => {
-///             heartbeat.fail(err.as_errno());
-///             std::process::exit(err.as_errno());
-///         }
-///     }
-///
-///     loop {
-///         println!("loooooooooop");
-///     }
-/// }
-///
-/// fn start() -> Result<(), yad::Error> {
-///     let heartbeat = yad::daemonize()?;
-///     daemon_process(heartbeat);
-/// }
-/// ```
-pub struct Heartbeat(Option<Pipe>, bool);
-
-impl Heartbeat {
-    /// Sets to emit a failure when dropped.
-    ///
-    /// The error emitted on drop will be of carry `UnknownErrno`. To specify an `errno`,
-    /// explicitly call [`fail()`](struct.Heartbeat.htnl#method.fail).
-    pub fn fail_on_drop(&mut self) {
-        self.1 = true;
-    }
-
-    /// Reports back to the invoking process that the daemon failed to initialize.
-    ///
-    /// It is best practice to terminate the failed daemon after cleaning up.
-    pub fn fail(mut self, errno: i32) {
-        if let Some(pipe) = self.0.take() {
-            pipe.error(DaemonError::Heartbeat, errno);
-        }
-    }
-
-    /// Reports back to the invoking process that the daemon successfully initialized and it is
-    /// running.
-    pub fn ok(mut self) {
-        if let Some(pipe) = self.0.take() {
-            pipe.write(0);
-        }
-    }
-}
-
-impl Drop for Heartbeat {
-    fn drop(&mut self) {
-        if let Some(pipe) = self.0.take() {
-            if self.1 {
-                pipe.error(DaemonError::Heartbeat, 0);
-            } else {
-                pipe.write(0);
-            }
-        }
-    }
-}
-
 fn exit_success(pipe: Pipe) -> ! {
-    pipe.write(0);
+    pipe.ok();
     std::process::exit(0);
 }
 
-fn exit_error(pipe: Pipe, error: DaemonError, cause: nix::Error) -> ! {
-    pipe.error(error, cause as i32);
-    std::process::exit(cause as i32);
+fn exit_error(pipe: Pipe, error: DaemonError, cause: impl Cause) -> ! {
+    let cause = cause.into_i32();
+    pipe.error(error, cause);
+    std::process::exit(cause);
+}
+
+trait Cause {
+    fn into_i32(self) -> i32;
+}
+
+impl Cause for nix::Error {
+    fn into_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl Cause for ErrorCode {
+    fn into_i32(self) -> i32 {
+        self.0
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     #[test]
     fn to_big_endian() {
         let int: i32 = 0x09ab_cdef;
         let array = int.to_be_bytes();
 
         assert_eq!(array, [0x09, 0xab, 0xcd, 0xef]);
+    }
+
+    #[test]
+    fn initialization_error() {
+        enum TestError {
+            One = 1,
+            Two = 2,
+        }
+
+        impl From<TestError> for i32 {
+            fn from(e: TestError) -> Self {
+                match e {
+                    TestError::One => 1,
+                    TestError::Two => 2,
+                }
+            }
+        }
+
+        let error =
+            daemonize_with_init(|| Result::<(), _>::Err(TestError::One.into())).unwrap_err();
+        assert_eq!(Error::Initialization { code: ErrorCode(1) }, error);
+
+        let error =
+            daemonize_with_init(|| Result::<(), _>::Err(TestError::Two.into())).unwrap_err();
+        assert_eq!(Error::Initialization { code: ErrorCode(2) }, error);
     }
 }
