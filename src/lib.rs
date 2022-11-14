@@ -238,8 +238,8 @@ pub fn daemonize() -> InvocationResult {
 /// }
 ///
 /// match yad::daemonize_with_init(|| {
-///     let file = std::fs::open("a_file").map_err(|_| Error::Read)?;
-///     std:;fs::write("another_file", b"some_content").map_err(|_| Error::Write)?;
+///     let file = std::fs::File::open("a_file").map_err(|_| Error::Read)?;
+///     std::fs::write("another_file", b"some_content").map_err(|_| Error::Write)?;
 ///     Ok(file)
 /// }) {
 ///     Ok(file) => println!("I'm a daemon with {file:?}"),
@@ -337,7 +337,7 @@ fn close_descriptors() -> InvocationResult {
             for fd in dir
                 .filter_map(Result::ok)
                 .filter_map(file_to_fd)
-                .filter(|fd| fd > &2)
+                .filter(|fd| *fd > 2)
             {
                 nix::unistd::close(fd).map_err(Error::CloseDescriptors)?;
             }
@@ -551,38 +551,11 @@ impl Cause for ErrorCode {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     #[test]
     fn to_big_endian() {
         let int: i32 = 0x09ab_cdef;
         let array = int.to_be_bytes();
 
         assert_eq!(array, [0x09, 0xab, 0xcd, 0xef]);
-    }
-
-    #[test]
-    fn initialization_error() {
-        enum TestError {
-            One = 1,
-            Two = 2,
-        }
-
-        impl From<TestError> for i32 {
-            fn from(e: TestError) -> Self {
-                match e {
-                    TestError::One => 1,
-                    TestError::Two => 2,
-                }
-            }
-        }
-
-        let error =
-            daemonize_with_init(|| Result::<(), _>::Err(TestError::One.into())).unwrap_err();
-        assert_eq!(Error::Initialization { code: ErrorCode(1) }, error);
-
-        let error =
-            daemonize_with_init(|| Result::<(), _>::Err(TestError::Two.into())).unwrap_err();
-        assert_eq!(Error::Initialization { code: ErrorCode(2) }, error);
     }
 }
