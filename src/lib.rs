@@ -321,7 +321,7 @@ where
 }
 
 fn close_descriptors() -> InvocationResult {
-    // Allowed because of the filter_map flow
+    // Allow(clippy::needless_pass_by_value): For the filter_map flow
     #[allow(clippy::needless_pass_by_value)]
     fn file_to_fd(entry: std::fs::DirEntry) -> Option<i32> {
         entry
@@ -330,21 +330,30 @@ fn close_descriptors() -> InvocationResult {
             .and_then(|name| name.parse().ok())
     }
 
-    let fd_dir = std::path::PathBuf::from("/dev/fd/");
-
-    match fd_dir.read_dir() {
-        Ok(dir) => {
-            for fd in dir
-                .filter_map(Result::ok)
-                .filter_map(file_to_fd)
-                .filter(|fd| *fd > 2)
-            {
-                nix::unistd::close(fd).map_err(Error::CloseDescriptors)?;
-            }
-            Ok(())
-        }
-        Err(_) => Err(Error::ListOpenDescriptors(nix::errno::Errno::last())),
+    // Allow(clippy::needless_pass_by_value): For the map_err flow
+    #[allow(clippy::needless_pass_by_value)]
+    fn err_list(err: std::io::Error) -> Error {
+        Error::ListOpenDescriptors(
+            err.raw_os_error()
+                .map_or_else(nix::errno::Errno::last, nix::errno::from_i32),
+        )
     }
+
+    std::path::PathBuf::from("/dev/fd/")
+        .read_dir()
+        .map_err(err_list)?
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter_map(file_to_fd)
+        .filter(|fd| *fd > 2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(nix::unistd::close)
+        .filter_map(Result::err)
+        .filter(|e| nix::Error::EBADF.ne(e))
+        .map(Error::CloseDescriptors)
+        .next()
+        .map_or_else(|| Ok(()), Err)
 }
 
 fn reset_signals() -> InvocationResult {
