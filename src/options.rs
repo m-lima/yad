@@ -22,7 +22,7 @@
 //! }
 //! ```
 
-/// Used by [`Stdio`](enum.Stdio.html) to represent a file.
+/// Used by [`Stdio`] to represent a file.
 pub trait File {
     /// Opens the file.
     ///
@@ -31,7 +31,7 @@ pub trait File {
     fn open(&self) -> std::io::Result<std::fs::File>;
 }
 
-/// Used by [`Stdio`](enum.Stdio.html) to represent an input file.
+/// Used by [`Stdio`] to represent an input file.
 pub struct Input {
     path: std::path::PathBuf,
     create: bool,
@@ -69,7 +69,7 @@ impl File for Input {
     }
 }
 
-/// Used by [`Stdio`](enum.Stdio.html) to represent an output file.
+/// Used by [`Stdio`] to represent an output file.
 pub struct Output {
     path: std::path::PathBuf,
     append: bool,
@@ -164,12 +164,12 @@ impl Options {
     /// # Errors
     /// If the daemonizing operation fails.
     ///
-    /// The invoking process, i.e. the process that called
-    /// [`daemonize()`](struct.Options.html#method.daemonize), will handle the error. The forked
-    /// process will be guaranteed to be terminated and the invoking process will own all resources.
+    /// The invoking process, i.e. the process that called [`daemonize()`](Self::daemonize()), will
+    /// handle the error. The forked process will be guaranteed to be terminated and the invoking
+    /// process will own all resources.
     ///
     /// # See also
-    /// [`daemonize()`](fn.daemonize.html)
+    /// [`yad::daemonize()`](crate::daemonize())
     pub fn daemonize(self) -> super::InvocationResult {
         super::daemonize_inner(self, || Ok(()))
     }
@@ -190,15 +190,15 @@ impl Options {
     /// # Errors
     /// If the daemonizing operation fails or if the initialization fails.
     ///
-    /// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
-    /// will handle the error. The forked process will be guaranteed to be terminated and the
-    /// invoking process will own all resources.
+    /// The invoking process, i.e. the process that called
+    /// [`daemonize_with_init()`](Self::daemonize_with_init()), will handle the error. The forked
+    /// process will be guaranteed to be terminated and the invoking process will own all resources.
     ///
     /// Any resources acquired during `initialization` execution will be owned just by the forked
     /// process and will be unwound and dropped upon error.
     ///
     /// # See also
-    /// [`daemonize_with_init()`](fn.daemonize_with_init.html)
+    /// [`yad::daemonize_with_init()`](crate::daemonize_with_init())
     pub fn daemonize_with_init<F, R>(self, initialization: F) -> super::InvocationResult<R>
     where
         F: FnOnce() -> Result<R, super::ErrorCode>,

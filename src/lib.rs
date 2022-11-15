@@ -10,7 +10,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use yad::options::Stdio;
+//! use yad::Stdio;
 //!
 //! match yad::with_options()
 //!     .stdin(Stdio::Null)
@@ -28,6 +28,7 @@
 //! * [Reference project in C](https://chaoticlab.io/c/c++/unix/2018/10/01/daemonize.html)
 
 pub mod options;
+pub use options::Stdio;
 
 type InvocationResult<T = ()> = Result<T, Error>;
 type DaemonResult<T = ()> = Result<T, (DaemonError, nix::Error)>;
@@ -35,7 +36,7 @@ type DaemonResult<T = ()> = Result<T, (DaemonError, nix::Error)>;
 /// Errors that can happen while daemonizing.
 ///
 /// These errors are received in the invoking process, i.e. the proccess that called
-/// [`daemonize()`](fn.daemonize.html).
+/// [`daemonize()`].
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Error {
     /// Daemon pid file already exists
@@ -70,7 +71,7 @@ pub enum Error {
     #[error("Failed to receive daemon status report: {0}")]
     ReadStatus(nix::Error),
 
-    /// Failed to start daemon after forking with a wrapped [`DaemonError`](enum.DaemonError.html)
+    /// Failed to start daemon after forking with a wrapped [`DaemonError`]
     #[error("Daemon failed to initialize: {error}: {cause}")]
     Daemon {
         /// The wrapped error sent by the forked process
@@ -96,7 +97,7 @@ impl Error {
 /// An error that occurs during initialization that can be represented as an `i32` and sent through
 /// the pipe back to the invoking process error handling.
 ///
-/// The is the expected error returned from [`daemonize_with_init()`](fn.daemonize_with_init.html).
+/// The is the expected error returned from [`daemonize_with_init()`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ErrorCode(pub i32);
 
@@ -115,13 +116,13 @@ impl std::fmt::Display for ErrorCode {
 /// Wrapped errors that can happen after the daemon has forked.
 ///
 /// The error is reported by another process through pipes and received by the invoking process,
-/// i.e. the process that called [`daemonize()`](fn.daemonize.html), will handle the error.
+/// i.e. the process that called [`daemonize()`], will handle the error.
 ///
 /// The forked process will be guaranteed to be terminated and the invoking process will own all
 /// resources.
 ///
 /// # See also
-/// [`Error`](enum.Error.html)
+/// [`Error`]
 #[derive(thiserror::Error, yad_derive::FromNum, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum DaemonError {
@@ -200,12 +201,12 @@ enum ForkResult {
 /// # Errors
 /// If the daemonizing operation fails.
 ///
-/// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
-/// will handle the error. The forked process will be guaranteed to be terminated and the invoking
-/// process will own all resources.
+/// The invoking process, i.e. the process that called [`daemonize()`], will handle the error. The
+/// forked process will be guaranteed to be terminated and the invoking process will own all
+/// resources.
 ///
 /// # See also
-/// [`with_options()`](fn.with_options.html)
+/// [`with_options()`]
 pub fn daemonize() -> InvocationResult {
     daemonize_inner(options::Options::new(), || Ok(()))
 }
@@ -250,15 +251,15 @@ pub fn daemonize() -> InvocationResult {
 /// # Errors
 /// If the daemonizing operation fails or if the initialization fails.
 ///
-/// The invoking process, i.e. the process that called [`daemonize()`](fn.daemonize.html),
-/// will handle the error. The forked process will be guaranteed to be terminated and the invoking
-/// process will own all resources.
+/// The invoking process, i.e. the process that called [`daemonize_with_init()`], will handle the
+/// error. The forked process will be guaranteed to be terminated and the invoking process will own
+/// all resources.
 ///
 /// Any resources acquired during `initialization` execution will be owned just by the forked
 /// process and will be unwound and dropped upon error.
 ///
 /// # See also
-/// [`with_options()`](fn.with_options.html)
+/// [`with_options()`]
 pub fn daemonize_with_init<F, R>(initialization: F) -> InvocationResult<R>
 where
     F: FnOnce() -> Result<R, ErrorCode>,
@@ -270,7 +271,7 @@ where
 ///
 /// # Example
 /// ```no_run
-/// use yad::options::Stdio;
+/// use yad::Stdio;
 ///
 /// match yad::with_options()
 ///     .stdin(Stdio::Null)
@@ -284,7 +285,9 @@ where
 /// ```
 ///
 /// # See also
-/// [`daemonize()`](fn.daemonize.html)
+/// [`options::Options::daemonize()`]
+/// <br>
+/// [`options::Options::daemonize_with_init()`]
 #[must_use]
 pub fn with_options() -> options::Options {
     options::Options::new()
@@ -352,8 +355,7 @@ fn close_descriptors() -> InvocationResult {
         .filter_map(Result::err)
         .filter(|e| nix::Error::EBADF.ne(e))
         .map(Error::CloseDescriptors)
-        .next()
-        .map_or_else(|| Ok(()), Err)
+        .try_fold((), |_, e| Err(e))
 }
 
 fn reset_signals() -> InvocationResult {
@@ -424,9 +426,9 @@ fn change_user(user: Option<nix::unistd::User>, group: Option<nix::unistd::Group
 }
 
 fn redirect_streams(
-    stdin: Option<options::Stdio<options::Input>>,
-    stdout: Option<options::Stdio<options::Output>>,
-    stderr: Option<options::Stdio<options::Output>>,
+    stdin: Option<Stdio<options::Input>>,
+    stdout: Option<Stdio<options::Output>>,
+    stderr: Option<Stdio<options::Output>>,
 ) -> DaemonResult {
     use nix::libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
     use std::os::unix::io::{AsRawFd, RawFd};
@@ -434,7 +436,7 @@ fn redirect_streams(
 
     fn redirect_stream<D, F>(
         devnull_fd: &mut D,
-        stdio: Option<options::Stdio<F>>,
+        stdio: Option<Stdio<F>>,
         fd: RawFd,
         error: DaemonError,
     ) -> DaemonResult
@@ -445,9 +447,9 @@ fn redirect_streams(
         if let Some(stdio) = stdio {
             nix::unistd::close(fd).map_err(|err| (error, err))?;
             let new_fd = match stdio {
-                options::Stdio::Null => devnull_fd(error)?,
-                options::Stdio::Fd(fd) => fd,
-                options::Stdio::File(file) => {
+                Stdio::Null => devnull_fd(error)?,
+                Stdio::Fd(fd) => fd,
+                Stdio::File(file) => {
                     let open_file = file.open().map_err(|_| (error, nix::Error::last()))?;
                     let raw_fd = open_file.as_raw_fd();
                     std::mem::forget(open_file);
