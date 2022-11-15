@@ -569,4 +569,40 @@ mod test {
 
         assert_eq!(array, [0x09, 0xab, 0xcd, 0xef]);
     }
+
+    #[test]
+    fn short_circuit_err() {
+        let list = [Ok(6), Ok(4), Ok(3), Err(5), Ok(1), Err(7), Ok(2), Ok(8)];
+        let mut count = 0;
+        let err = list
+            .into_iter()
+            .map(|i| {
+                count += 1;
+                i
+            })
+            .filter_map(Result::err)
+            .filter(|e| *e > 5)
+            .try_fold((), |_, e| Err(e));
+
+        assert_eq!(Err(7), err);
+        assert_eq!(6, count);
+    }
+
+    #[test]
+    fn short_circuit_no_err() {
+        let list = [Ok(6), Ok(4), Ok(3), Err(5), Ok(1), Ok(7), Ok(2), Ok(8)];
+        let mut count = 0;
+        let err = list
+            .into_iter()
+            .map(|i| {
+                count += 1;
+                i
+            })
+            .filter_map(Result::err)
+            .filter(|e| *e > 5)
+            .try_fold((), |_, e| Err(e));
+
+        assert_eq!(Ok(()), err);
+        assert_eq!(8, count);
+    }
 }
