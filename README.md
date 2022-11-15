@@ -1,18 +1,17 @@
 # Yet Another Daemonizer
 [![Github](https://github.com/m-lima/yad/workflows/build/badge.svg)](https://github.com/m-lima/yad/actions?workflow=build)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Cargo](https://img.shields.io/crates/v/yad.svg)](
-https://crates.io/crates/yad)
+[![Cargo](https://img.shields.io/crates/v/yad.svg)](https://crates.io/crates/yad)
 [![Documentation](https://docs.rs/yad/badge.svg)](https://docs.rs/yad)
 
-Yet Another Daemonizer is a daemonizing crate to easily, simply, and **correctly** create legacy
-daemons.
+Yet Another Daemonizer is a daemonizing crate to easily, simply, and **correctly** create legacy daemons.
 
-This crate focuses on manually creating a background process which is not managed by a
-supervisor such as systemd or launchd. It strives to follow all the best practices
-to correctly daemonize a process.
+This crate focuses on manually creating a background process which is not managed by a supervisor such as systemd or launchd. It strives to follow all the best practices to correctly daemonize a process.
+
 
 ## Example
+
+
 ```rust
 use yad::Stdio;
 
@@ -27,6 +26,12 @@ match yad::with_options()
 }
 ```
 
+
 ## References
-* [Man page for daemon()](https://man7.org/linux/man-pages/man7/daemon.7.html)
-* [Reference project in C](https://chaoticlab.io/c/c++/unix/2018/10/01/daemonize.html)
+
+ - [Man page for daemon()][__link0]
+ - [Reference project in C][__link1]
+
+
+ [__link0]: https://man7.org/linux/man-pages/man7/daemon.7.html
+ [__link1]: https://chaoticlab.io/c/c++/unix/2018/10/01/daemonize.html

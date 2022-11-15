@@ -1,8 +1,11 @@
 # Yet Another Daemonizer
-[![Github](https://github.com/m-lima/yad/workflows/build/badge.svg)](https://github.com/m-lima/yad/actions?workflow=build)
+[![Github]({{ repository }}/workflows/build/badge.svg)]({{ repository }}/actions?workflow=build)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Cargo](https://img.shields.io/crates/v/yad.svg)](
-https://crates.io/crates/yad)
-[![Documentation](https://docs.rs/yad/badge.svg)](https://docs.rs/yad)
+[![Cargo](https://img.shields.io/crates/v/{{ crate | urlencode }}.svg)](https://crates.io/crates/{{ crate | urlencode }})
+[![Documentation](https://docs.rs/{{ crate | urlencode }}/badge.svg)](https://docs.rs/{{ crate | urlencode }})
 
 {{readme}}
+
+{%- if links != "" %}
+{{ links }}
+{%- endif -%}
