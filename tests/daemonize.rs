@@ -69,13 +69,12 @@ fn error_during_init() {
 }
 
 fn run_test(exe: &str, test: &'static str) -> bool {
-    let (mut child, _, stdout, stderr) = std::process::Command::new(exe)
+    let child = std::process::Command::new(exe)
         .arg(test)
         .spawn_owned()
-        .unwrap()
-        .eject();
+        .unwrap();
 
-    let status = child.wait().unwrap();
+    let (status, stdout, stderr) = child.wait().unwrap();
 
     if status.success() {
         println!("execution daemonize::{test} ... [32mok[m");

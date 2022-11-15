@@ -16,8 +16,8 @@ path = "tests/daemonize.rs"
 harness = false
 
 [dependencies]
-nix = "0.25"
-thiserror = "1"
+nix = "0.25.0"
+thiserror = "1.0.37"
 
 [dev-dependencies]
-pwner = "0.1.7"
+pwner = "0.1.8"
