@@ -14,7 +14,7 @@ to correctly daemonize a process.
 
 ## Example
 ```rust
-use yad::options::Stdio;
+use yad::Stdio;
 
 match yad::with_options()
     .stdin(Stdio::Null)

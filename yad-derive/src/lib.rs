@@ -38,8 +38,10 @@ fn derive_from_num_impl(input: syn::DeriveInput) -> proc_macro2::TokenStream {
     quote::quote! {
         impl #ident {
             fn from_num(num: #repr) -> Option<Self> {
-                #(if Self::#variants as #repr == num { return Some(Self::#variants); })*
-                None
+                match num {
+                    #(_ if Self::#variants as #repr == num => Some(Self::#variants),)*
+                    _ => None,
+                }
             }
         }
     }
@@ -62,9 +64,11 @@ mod tests {
         let expected = quote::quote! {
             impl S {
                 fn from_num(num: u8) -> Option<Self> {
-                    if Self::One as u8 == num { return Some(Self::One); }
-                    if Self::Two as u8 == num { return Some(Self::Two); }
-                    None
+                    match num {
+                        _ if Self::One as u8 == num => Some(Self::One),
+                        _ if Self::Two as u8 == num => Some(Self::Two),
+                        _ => None,
+                    }
                 }
             }
         };

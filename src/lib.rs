@@ -123,7 +123,7 @@ impl std::fmt::Display for ErrorCode {
 ///
 /// # See also
 /// [`Error`]
-#[derive(thiserror::Error, yad_derive::FromNum, Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum DaemonError {
     /// Failure detaching from session
@@ -178,6 +178,45 @@ pub enum DaemonError {
     #[error("Failed initialize daemon after forking")]
     Initialization = 13,
 }
+
+macro_rules! from_num {
+    ($name: ident, $num: ty, $($variant: ident),*) => {
+        impl $name {
+            #[inline]
+            const fn from_num(num: $num) -> Option<Self> {
+                // Check for exhaustiveness
+                fn _check(num: $name) {
+                    match num {
+                        $($name::$variant => (),)*
+                    }
+                }
+
+                match num {
+                    $(_ if Self::$variant as $num == num => Some(Self::$variant),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+from_num!(
+    DaemonError,
+    u8,
+    Setsid,
+    Fork,
+    ChangeRoot,
+    SetUser,
+    SetGroup,
+    UnblockSignals,
+    CloseDescriptors,
+    ListOpenDescriptors,
+    ResetSignals,
+    RedirectStdin,
+    RedirectStdout,
+    RedirectStderr,
+    Initialization
+);
 
 #[derive(Debug)]
 enum ForkResult {

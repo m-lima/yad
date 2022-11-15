@@ -1,6 +1,6 @@
 [package]
 name = "yad"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["Marcelo Lima <marcelowind@gmail.com>"]
 edition = "2021"
 readme = "README.md"
@@ -17,4 +17,3 @@ path = "tests/daemonize_run.rs"
 [dependencies]
 nix = "0.25"
 thiserror = "1"
-yad-derive = { path = "yad-derive" }
