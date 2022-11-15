@@ -1,3 +1,6 @@
+use std::io::{Read, Write};
+
+use pwner::Spawner;
 use yad::{DaemonError, Error, ErrorCode, Stdio};
 
 fn can_daemonize() {
@@ -66,18 +69,39 @@ fn error_during_init() {
 }
 
 fn run_test(exe: &str, test: &'static str) -> bool {
-    let child = std::process::Command::new(exe)
+    let (mut child, _, stdout, stderr) = std::process::Command::new(exe)
         .arg(test)
-        .spawn()
+        .spawn_owned()
         .unwrap()
-        .wait_with_output()
-        .unwrap();
+        .eject();
 
-    if child.status.success() {
+    let status = child.wait().unwrap();
+
+    if status.success() {
         println!("execution daemonize::{test} ... [32mok[m");
         true
     } else {
         println!("execution daemonize::{test} ... [31mfail[m");
+        let mut buffer = String::new();
+        let mut reader = std::io::BufReader::new(stdout);
+        reader.read_to_string(&mut buffer).unwrap();
+        if !buffer.is_empty() {
+            println!();
+            println!("----- stdout -----");
+            print!("{buffer}");
+            drop(std::io::stdout().flush());
+        }
+
+        buffer.clear();
+        let mut reader = std::io::BufReader::new(stderr);
+        reader.read_to_string(&mut buffer).unwrap();
+        if !buffer.is_empty() {
+            println!();
+            println!("----- stderr -----");
+            println!("{buffer}");
+            drop(std::io::stdout().flush());
+        }
+
         false
     }
 }
