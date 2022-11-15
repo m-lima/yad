@@ -10,9 +10,10 @@ categories = ["os", "os::unix-apis", "os::macos-apis", "os::linux-apis", "os::fr
 description = "Yet Another Daemonizer is a daemonizing crate to easily, simply, and correctly create legacy daemons"
 license = "MIT"
 
-[[bin]]
-name = "test_daemonize"
-path = "tests/daemonize_run.rs"
+[[test]]
+name = "daemonize"
+path = "tests/daemonize.rs"
+harness = false
 
 [dependencies]
 nix = "0.25"
